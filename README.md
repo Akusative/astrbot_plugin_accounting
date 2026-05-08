@@ -16,14 +16,9 @@
 ## 🚀 如何安装与开启
 
 1. **放置插件**：将本插件文件夹（`astrbot_plugin_accounting`）放置在 AstrBot 项目目录的 `data/plugins/` 下。
-2. **安装依赖**：
-   在终端进入插件目录，安装必要的依赖：
-   ```bash
-   pip install -r requirements.txt
-   ```
-   *(注：主要依赖为 `aiosqlite` 用于异步操作数据库)*
-3. **重启/重载**：在 AstrBot 的 WebUI 管理面板中重载插件，或者直接重启 AstrBot 进程。
-4. **模型要求**：本插件极度依赖大模型的 **Tool Calling（函数调用）** 能力。请确保您在 AstrBot 中选择并激活的模型支持工具调用（例如 GPT-4o, Claude 3.5 Sonnet, DeepSeek V3 等）。
+   *(本插件使用 Python 内置库开发，**完全零依赖**，直接放入即可使用，不需要运行任何安装命令！)*
+2. **重启/重载**：在 AstrBot 的 WebUI 管理面板中重载插件，或者直接重启 AstrBot 进程。
+3. **模型要求**：本插件极度依赖大模型的 **Tool Calling（函数调用）** 能力。请确保您在 AstrBot 中选择并激活的模型支持工具调用（例如 GPT-4o, Claude 3.5 Sonnet, DeepSeek V3 等）。
 
 ---
 
