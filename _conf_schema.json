@@ -1,0 +1,9 @@
+{
+    "fast_model_id": {
+        "type": "string",
+        "description": "记账专用轻量模型",
+        "hint": "用于处理记账逻辑的轻量级模型（如 gemini-1.5-flash）。处理完后会由主模型生成最终回复。",
+        "default": "",
+        "_special": "select_provider"
+    }
+}
