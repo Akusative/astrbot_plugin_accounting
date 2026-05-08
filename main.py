@@ -297,7 +297,7 @@ class GetAccountStatusTool(FunctionTool[AstrAgentContext]):
             
         return res
 
-@register("astrbot_plugin_accounting", "沈菀", "智能记账助手", "1.0.0")
+@register("astrbot_plugin_accounting", "沈菀", "智能记账助手", "1.1.0")
 class AccountingPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)

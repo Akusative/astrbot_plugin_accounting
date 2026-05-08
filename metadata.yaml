@@ -1,6 +1,6 @@
 name: astrbot_plugin_accounting
 display_name: 智能记账助手
 desc: 基于大语言模型的智能记账、查账、财务状态分析与消费建议助手。
-version: v1.0.0
+version: v1.1.0
 author: 沈菀
 repo: https://github.com/Akusative/astrbot_plugin_accounting
