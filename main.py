@@ -86,6 +86,7 @@ class RecordTransactionTool(FunctionTool[AstrAgentContext]):
         },
         "required": ["description", "amount"]
     })
+    thresholds: list = Field(default_factory=lambda: [80.0, 100.0])
 
     async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> ToolExecResult:
         description = kwargs.get("description")
@@ -132,10 +133,10 @@ class RecordTransactionTool(FunctionTool[AstrAgentContext]):
         if monthly_budget > 0:
             remaining_budget = monthly_budget - spent_this_month
             res += f" 当月日常消费已用 {spent_this_month}元，日常预算剩余 {remaining_budget}元。"
-            if spent_this_month >= monthly_budget:
-                res += " ⚠️警告：当月日常消费已达到或超出预算！"
-            elif spent_this_month >= monthly_budget * 0.8:
-                res += " ⚠️提示：当月日常消费已达到预算的80%。"
+            for t in sorted(self.thresholds, reverse=True):
+                if spent_this_month >= monthly_budget * (t / 100.0):
+                    res += f" ⚠️提示：当月日常消费已达到或超过预算的 {t}%！"
+                    break
         return res
 
 @dataclass
@@ -346,9 +347,16 @@ class AccountingPlugin(Star):
             
         logger.info(f"astrbot_plugin_accounting: Using fast model [{fast_model}] to handle query: {query}")
         
+        # 获取预警阈值
+        thresholds_str = self.config.get("warning_thresholds", "80, 100")
+        try:
+            parsed_thresholds = [float(x.strip()) for x in thresholds_str.split(",") if x.strip()]
+        except Exception:
+            parsed_thresholds = [80.0, 100.0]
+        
         tools = ToolSet([
             InitAccountTool(),
-            RecordTransactionTool(),
+            RecordTransactionTool(thresholds=parsed_thresholds),
             SetFixedDeductionTool(),
             SetMonthlyBudgetTool(),
             QueryTransactionsTool(),
