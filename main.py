@@ -82,15 +82,20 @@ class RecordTransactionTool(FunctionTool[AstrAgentContext]):
             "amount": {
                 "type": "number",
                 "description": "金额（正数为入账，负数为支出）",
+            },
+            "category": {
+                "type": "string",
+                "description": "消费分类（如：餐饮、交通、购物、娱乐、居住、医疗、人情、其他等），收入也可分类（如：工资、理财、兼职等）",
             }
         },
-        "required": ["description", "amount"]
+        "required": ["description", "amount", "category"]
     })
     thresholds: list = Field(default_factory=lambda: [80.0, 100.0])
 
     async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> ToolExecResult:
         description = kwargs.get("description")
         amount = kwargs.get("amount")
+        category = kwargs.get("category", "未分类")
         user_id = context.context.event.get_sender_id()
         _check_and_apply_monthly_deduction(user_id)
         
@@ -107,9 +112,9 @@ class RecordTransactionTool(FunctionTool[AstrAgentContext]):
             ''', (user_id, current_month))
             
             db.execute('''
-                INSERT INTO transactions (user_id, timestamp, date, description, amount)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (user_id, timestamp, date_str, description, amount))
+                INSERT INTO transactions (user_id, timestamp, date, description, amount, category)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (user_id, timestamp, date_str, description, amount, category))
             
             db.execute('''
                 UPDATE users SET balance = balance + ? WHERE user_id = ?
@@ -231,13 +236,13 @@ class QueryTransactionsTool(FunctionTool[AstrAgentContext]):
         
         with sqlite3.connect(DB_PATH) as db:
             cursor = db.execute('''
-                SELECT date, description, amount FROM transactions
+                SELECT date, description, amount, category FROM transactions
                 WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
                 ORDER BY timestamp ASC
             ''', (user_id, start_ts, end_ts))
             for row in cursor:
-                date, desc, amount = row
-                records.append(f"{date} | {desc} | {amount}元")
+                date, desc, amount, cat = row
+                records.append(f"[{cat}] {date} | {desc} | {amount}元")
                 if amount > 0:
                     total_income += amount
                 else:
@@ -249,6 +254,122 @@ class QueryTransactionsTool(FunctionTool[AstrAgentContext]):
         summary = f"{start_date} 到 {end_date} 账单明细：\n"
         summary += "\n".join(records)
         summary += f"\n---\n总收入: {total_income}元, 总支出: {total_expense}元"
+        return summary
+
+@dataclass
+class DeleteTransactionTool(FunctionTool[AstrAgentContext]):
+    name: str = "delete_transaction"
+    description: str = "删除/撤销最近的一笔账单流水，或者撤销特定关键词描述的流水，并恢复对应余额。当用户说“记错了，撤销刚刚那笔”、“删除那笔打车记录”时使用。"
+    parameters: dict = Field(default_factory=lambda: {
+        "type": "object",
+        "properties": {
+            "keyword": {
+                "type": "string",
+                "description": "可选。用于匹配记录描述的关键词，如果为空则默认撤销最近的一笔。",
+            }
+        }
+    })
+
+    async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> ToolExecResult:
+        keyword = kwargs.get("keyword", "")
+        user_id = context.context.event.get_sender_id()
+        
+        with sqlite3.connect(DB_PATH) as db:
+            if keyword:
+                cursor = db.execute('''
+                    SELECT id, description, amount, date FROM transactions
+                    WHERE user_id = ? AND description LIKE ?
+                    ORDER BY timestamp DESC LIMIT 1
+                ''', (user_id, f"%{keyword}%"))
+            else:
+                cursor = db.execute('''
+                    SELECT id, description, amount, date FROM transactions
+                    WHERE user_id = ?
+                    ORDER BY timestamp DESC LIMIT 1
+                ''', (user_id,))
+                
+            row = cursor.fetchone()
+            if not row:
+                return "没有找到匹配的流水记录，无法撤销。"
+                
+            trans_id, desc, amount, date_str = row
+            
+            # 删除记录
+            db.execute("DELETE FROM transactions WHERE id = ?", (trans_id,))
+            
+            # 恢复余额
+            db.execute('''
+                UPDATE users SET balance = balance - ? WHERE user_id = ?
+            ''', (amount, user_id))
+            db.commit()
+            
+            cursor = db.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
+            balance_row = cursor.fetchone()
+            balance = balance_row[0] if balance_row else 0
+            
+        return f"撤销成功：已删除记录 [{date_str} | {desc} | {amount}元]。当前总余额已恢复为 {balance}元。"
+
+@dataclass
+class QueryStatisticsTool(FunctionTool[AstrAgentContext]):
+    name: str = "query_statistics"
+    description: str = "根据给定的时间范围，按消费分类（category）汇总统计支出和收入。回答“我这周餐饮花了多少”、“帮我分析一下上个月的账单”时使用。"
+    parameters: dict = Field(default_factory=lambda: {
+        "type": "object",
+        "properties": {
+            "start_date": {
+                "type": "string",
+                "description": "开始日期，格式为 YYYY-MM-DD",
+            },
+            "end_date": {
+                "type": "string",
+                "description": "结束日期，格式为 YYYY-MM-DD",
+            }
+        },
+        "required": ["start_date", "end_date"]
+    })
+
+    async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs) -> ToolExecResult:
+        start_date = kwargs.get("start_date")
+        end_date = kwargs.get("end_date")
+        user_id = context.context.event.get_sender_id()
+        
+        try:
+            start_ts = int(datetime.datetime.strptime(start_date, '%Y-%m-%d').timestamp())
+            end_dt = datetime.datetime.strptime(end_date, '%Y-%m-%d')
+            end_dt = end_dt.replace(hour=23, minute=59, second=59)
+            end_ts = int(end_dt.timestamp())
+        except ValueError:
+            return "日期格式错误，请确保使用 YYYY-MM-DD 格式（例如 2026-05-08）。"
+
+        stats = {}
+        total_income = 0
+        total_expense = 0
+        
+        with sqlite3.connect(DB_PATH) as db:
+            cursor = db.execute('''
+                SELECT category, amount FROM transactions
+                WHERE user_id = ? AND timestamp >= ? AND timestamp <= ?
+            ''', (user_id, start_ts, end_ts))
+            for row in cursor:
+                cat, amount = row
+                if not cat:
+                    cat = "未分类"
+                if cat not in stats:
+                    stats[cat] = 0
+                stats[cat] += amount
+                if amount > 0:
+                    total_income += amount
+                else:
+                    total_expense += abs(amount)
+
+        if not stats:
+            return f"{start_date} 到 {end_date} 期间没有账单流水。"
+            
+        summary = f"【{start_date} 到 {end_date} 分类统计】\n"
+        for cat, amt in stats.items():
+            if amt != 0:
+                summary += f"- {cat}: {amt}元\n"
+        summary += f"---\n总收入: {total_income}元, 总支出: {total_expense}元"
         return summary
 
 @dataclass
@@ -327,9 +448,17 @@ class AccountingPlugin(Star):
                     timestamp INTEGER,
                     date TEXT,
                     description TEXT,
-                    amount REAL
+                    amount REAL,
+                    category TEXT DEFAULT '未分类'
                 )
             ''')
+            
+            # Check and add category column if it doesn't exist for older versions
+            cursor = db.execute("PRAGMA table_info(transactions)")
+            columns = [info[1] for info in cursor.fetchall()]
+            if 'category' not in columns:
+                db.execute("ALTER TABLE transactions ADD COLUMN category TEXT DEFAULT '未分类'")
+                
             db.commit()
         logger.info("astrbot_plugin_accounting: Database initialized successfully.")
 
@@ -360,7 +489,9 @@ class AccountingPlugin(Star):
             SetFixedDeductionTool(),
             SetMonthlyBudgetTool(),
             QueryTransactionsTool(),
-            GetAccountStatusTool()
+            GetAccountStatusTool(),
+            DeleteTransactionTool(),
+            QueryStatisticsTool()
         ])
         
         try:
