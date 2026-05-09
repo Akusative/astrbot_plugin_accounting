@@ -494,12 +494,13 @@ class AccountingPlugin(Star):
             QueryStatisticsTool()
         ])
         
+        current_time = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         try:
             llm_resp = await self.context.tool_loop_agent(
                 event=event,
                 chat_provider_id=fast_model,
                 prompt=query,
-                system_prompt="你是一个极速的记账工具人。严格使用提供的工具来满足用户的记账/查账请求，获取到工具返回的结果后直接将其告知用户，不要废话和自行发挥。",
+                system_prompt=f"你是一个极速的记账工具人。当前时间是 {current_time}。严格使用提供的工具来满足用户的记账/查账请求，获取到工具返回的结果后直接将其告知用户，不要废话和自行发挥。",
                 tools=tools,
                 max_steps=10
             )
